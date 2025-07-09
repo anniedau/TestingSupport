@@ -1,0 +1,11 @@
+# Core dependencies - only what you need
+Flask==2.3.3
+requests==2.31.0
+PyPDF2==3.0.1
+beautifulsoup4==4.12.2
+
+# Optional: For better PDF processing (add later)
+# pdfplumber==0.10.3
+
+# Optional: For testing (add later)
+# pytest==7.4.3 

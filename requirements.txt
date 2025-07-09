@@ -1,0 +1,50 @@
+# Core Framework
+Flask==2.3.3
+requests==2.31.0
+PyPDF2==3.0.1
+
+# Enhanced PDF Processing
+pdfplumber==0.10.3
+PyMuPDF==1.23.8
+beautifulsoup4==4.12.2
+
+# Testing & Quality
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+pytest-html==4.1.1
+allure-pytest==2.13.2
+factory-boy==3.3.0
+faker==20.1.0
+
+# Configuration & Environment
+python-dotenv==1.0.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+PyYAML==6.0.1
+
+# Logging & Monitoring
+structlog==23.2.0
+prometheus-client==0.19.0
+sentry-sdk==1.38.0
+
+# Async & Performance
+aiohttp==3.9.1
+asyncio-throttle==1.0.2
+celery==5.3.4
+redis==5.0.1
+
+# Reporting & Export
+openpyxl==3.1.2
+jinja2==3.1.2
+weasyprint==60.2
+
+# Security & Validation
+cryptography==41.0.8
+validators==0.22.0
+
+# Development Tools
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1
+pre-commit==3.6.0 
