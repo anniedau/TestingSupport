@@ -34,8 +34,7 @@ CONFIG = {
     'valid_status_codes': [200, 201, 202, 203, 204, 205, 206],
     'max_links_per_page': 200,
     'exclude_patterns': [
-        r'javascript:', r'data:', r'mailto:', r'tel:', r'#',
-        r'\.pdf$', r'\.doc$', r'\.docx$', r'\.zip$', r'\.exe$'
+        r'javascript:', r'data:', r'mailto:', r'tel:', r'#', r'\.doc$', r'\.docx$', r'\.zip$', r'\.exe$'
     ],
     'content_check_timeout': 5,
     'enable_content_validation': True
@@ -75,29 +74,9 @@ HTML_TEMPLATE = """
         <h1>🌐 Localization Link Checker</h1>
         <p><strong>Purpose:</strong> Check all links on a localized webpage to ensure they work correctly.</p>
         
-        <!-- Single Link Test Section -->
+        <!-- Full Page Section -->
         <div class="test-section">
-            <h3>🧪 Single Link Test (Debug Mode)</h3>
-            <form method="post">
-                <div class="form-group">
-                    <label for="localization_url_test">Localization URL:</label>
-                    <input type="text" id="localization_url_test" name="localization_url" 
-                           placeholder="https://example.com/it/ or https://example.com/fr/" 
-                           value="{{ request.form.get('localization_url', '') }}" required>
-                </div>
-                <div class="form-group">
-                    <label for="test_single_link">Single Link to Test:</label>
-                    <input type="text" id="test_single_link" name="test_single_link" 
-                           placeholder="https://example.com/renewal/" 
-                           value="{{ request.form.get('test_single_link', '') }}" required>
-                </div>
-                <button type="submit" class="btn btn-test">🧪 Test Single Link</button>
-            </form>
-        </div>
-        
-        <!-- Full Page Test Section -->
-        <div class="test-section">
-            <h3>🔍 Full Page Test</h3>
+            <h3>🔍 Full Page </h3>
             <form method="post">
                 <div class="form-group">
                     <label for="localization_url_full">Enter Localization URL:</label>
@@ -110,7 +89,16 @@ HTML_TEMPLATE = """
             </form>
         </div>
 
-        {% if stats %}
+        {% if stats and (stats.warning or stats.error) %}
+        <div class="alert-warning">
+            <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+            <strong>⚠️ Warning:</strong> {{ stats.warning or stats.error }}
+            </div>
+        </div>
+        {% endif %}
+
+
+        {% if stats and not (stats.warning or stats.error) %}
         <div class="localization-info">
             <h3>🌍 Localization Info</h3>
             <p><strong>Localization URL:</strong> {{ stats.base_url }}</p>
@@ -134,6 +122,7 @@ HTML_TEMPLATE = """
         </div>
         {% endif %}
         
+        <br>
         <h3>🔍 Link Results</h3>
         <div>
             {% for result in links %}
@@ -145,12 +134,6 @@ HTML_TEMPLATE = """
                 <a href="{{ result.url }}" target="_blank">{{ result.url }}</a>
                 {% if result.link_text %}
                 <br><small>Link Text: "{{ result.link_text[:50] }}{% if result.link_text|length > 50 %}...{% endif %}"</small>
-                {% endif %}
-                {% if result.response_time %}
-                <br><small>Response: {{ "%.3f"|format(result.response_time) }}s</small>
-                {% endif %}
-                {% if result.error_message %}
-                <br><small class="error-status">Error: {{ result.error_message }}</small>
                 {% endif %}
                 {% if result.localization_issue %}
                 <br><small class="defect-status">Localization Issue: {{ result.localization_issue }}</small>
@@ -164,11 +147,21 @@ HTML_TEMPLATE = """
 </html>
 """
 
+def is_valid_url(url):
+    regex = re.compile(
+        r'^(?:http|https)://'  # http:// or https://
+        r'\S+'  # domain...
+        r'(?::\d+)?'  # optional port
+        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+    return re.match(regex, url) is not None
+
+
 def has_locale_prefix(url):
     """Check if the URL contains a locale prefix like /de/, /fr/, etc."""
     parsed = urlparse(url)
     # Accepts /de/, /fr/, /es/, etc. at the start of the path
     return bool(re.match(r'^/([a-z]{2})(?:-[a-z]{2})?/', parsed.path))
+
 
 def is_url_available(url):
     """Check if the URL is well-formed, uses http/https and responds with HTTP 200."""
@@ -184,8 +177,10 @@ def is_url_available(url):
         headers = {'User-Agent': CONFIG['user_agent']}
         response = requests.head(url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
         return response.status_code == 200
-    except Exception:
+    except Exception as e:
+        logger.exception(f"❌ URL available check failed: {e}")
         return False
+
 
 def get_expected_localization_url(url, base_url):
     """Get the expected localization URL for a given link, supporting cross-domain localization"""
@@ -219,10 +214,10 @@ def get_expected_localization_url(url, base_url):
             return localized_url
 
     # If different domain, try the detected language first
-    # Try to insert /es/ or /en/ after the domain
     if base_lang not in ['es', 'fr', 'de', 'it', 'ru']:
         base_lang = ''  # fallback to 'en' if not detected
 
+    # Add the expected localization to the link to get the localized_url
     if not re.match(rf'^/{base_lang}(/|$)', parsed_url.path):
         localized_path = f'/{base_lang}{parsed_url.path}'
         localized_url = f"{parsed_url.scheme}://{parsed_url.netloc}{localized_path}"
@@ -230,63 +225,21 @@ def get_expected_localization_url(url, base_url):
             headers = {'User-Agent': CONFIG['user_agent']}
             resp = requests.head(localized_url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
             if resp.status_code == 200:
+                # Rebuild URL with fragment
+                localized_url = urlunparse((
+                    parsed_url.scheme,
+                    parsed_url.netloc,
+                    localized_path,
+                    parsed_url.params,
+                    parsed_url.query,
+                    parsed_url.fragment
+                ))
                 return localized_url
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception(f"❌ Error checking expected localization URL: {e}")
 
-    # Fallback: try /es/ and /en/ if not already tried
-    for lang in ['es', '']:
-        if lang == base_lang:
-            continue
-        if not re.match(rf'^/{lang}(/|$)', parsed_url.path):
-            localized_path = f'/{lang}{parsed_url.path}'
-            localized_url = f"{parsed_url.scheme}://{parsed_url.netloc}{localized_path}"
-            try:
-                headers = {'User-Agent': CONFIG['user_agent']}
-                resp = requests.head(localized_url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
-                if resp.status_code == 200:
-                    return localized_url
-            except Exception:
-                continue
     # If no localized version found, return original
     return url
-
-
-# --- Only use redirect-based logic for localization defect detection ---
-def check_localization_consistency(url, base_url):
-    """
-    Check if the link on the localized page points to the correct localized version.
-    Only report a defect if the expected localized URL exists as a real page (not a redirect).
-    """
-    try:
-        expected_url = get_expected_localization_url(url, base_url)
-        if expected_url == url:
-            return {'status': 'success', 'issue': None}
-
-        headers = {'User-Agent': CONFIG['user_agent']}
-        # Use GET to follow redirects and get the final URL
-        response = requests.get(expected_url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
-        final_url = response.url
-
-        # If the expected localized URL does not exist (redirects elsewhere), no defect
-        if final_url.rstrip('/') != expected_url.rstrip('/'):
-            # No localized version exists, this is expected
-            return {
-                'status': 'success',
-                'issue': f'Expected localization {expected_url}; but redirects to {final_url} (no localized version exists)'
-            }
-
-        # If the expected localized URL exists as a real page, but the link does not point to it, report a defect
-        return {
-            'status': 'localization_defect',
-            'issue': f'Link should point to {expected_url} (localized version exists)'
-        }
-
-    except Exception as e:
-        return {
-            'status': 'localization_defect',
-            'issue': f'Cannot verify expected localization: {str(e)}'
-        }
 
 
 def extract_links_from_main_content(url):
@@ -304,10 +257,17 @@ def extract_links_from_main_content(url):
             logger.warning("No <main> tag found, falling back to <body> or full page.")
             main = soup.body if soup.body else soup  # fallback to whole page
 
+        if not hasattr(main, 'find_all'):
+            logger.exception("Main content is not a tag, cannot extract links.")
+            return [], "Error"
+
         links = []
         for link in main.find_all('a', href=True):
             href = link.get('href').strip()
             link_text = link.get_text().strip()
+            # ❌ Skip links containing ?pag=
+            if 'pag=' in href:
+                continue
             links.append({
                 'url': urljoin(url, href),
                 'link_text': link_text,
@@ -331,42 +291,75 @@ def extract_links_from_main_content(url):
         return unique_links, soup.title.string if soup.title else "No title"
 
     except Exception as e:
-        logger.error(f"❌ Error fetching webpage: {e}")
+        logger.exception(f"❌ Error fetching webpage: {e}")
         return [], "Error"
 
 
 def check_link_localization(link_url, base_url, locale):
+    """
+    Check if the link on the localized page (for the already localized and not localized cases)
+    """
     parsed_link = urlparse(link_url)
-    # 1. Already localized?
+
+    # 1. Already localized: check head request status code first
     if re.match(rf'^/{locale}(/|$)', parsed_link.path):
         try:
             headers = {'User-Agent': CONFIG['user_agent']}
             resp = requests.head(link_url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
             if resp.status_code == 200:
-                return 'success', 200, None
+                response = requests.get(link_url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
+                final_url = response.url
+
+                if response.status_code == 200:
+                    # If the final URL is the same with the input link -> success
+                    if final_url.rstrip('/') == link_url.rstrip('/'):
+                        return 'success', 200, None
+                    else:
+                        # If the final link is different with the input link -> localization defect
+                        return 'localization_defect', 200, f'Final link should be default link - {final_url}; but input link is {link_url}'
             else:
+                # If status code non-200 -> defect
                 return 'defect', resp.status_code, f"Localized link responds with status {resp.status_code}"
         except Exception as e:
             return 'defect', None, f"Error checking link: {e}"
-    # 2. Not localized: try to generate localized version
-    # localized_path = f'/{locale}{parsed_link.path}' if not re.match(rf'^/{locale}(/|$)', parsed_link.path) else parsed_link.path
-    # localized_url = f"{parsed_link.scheme}://{parsed_link.netloc}{localized_path}"
-    localized_url = get_expected_localization_url(link_url, base_url)
+
+    # 2. Not localized: check the actual localization redirect; try to generate localized version
+    return check_localization_consistency(link_url, base_url)
+
+
+# --- Only use redirect-based logic for localization defect detection ---
+def check_localization_consistency(url, base_url):
+    """
+    Check if the link on the localized page points to the correct localized version.
+    Only report a defect if the expected localized URL exists as a real page (not a redirect).
+    """
     try:
+        expected_url = get_expected_localization_url(url, base_url)
+        if expected_url == url:
+            return 'success', 200, None
+
         headers = {'User-Agent': CONFIG['user_agent']}
-        resp = requests.get(localized_url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
-        if resp.status_code == 200:
-            if resp.url.rstrip('/') == localized_url.rstrip('/'):
-                # Localized version exists as a real page
-                return 'defect', 200, f"Localized version exists: {localized_url} (should use this)"
+        # Use GET to follow redirects and get the final URL
+        response = requests.get(expected_url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
+        final_url = response.url
+
+        if response.status_code == 200:
+            # If the expected localized URL (without trailing slashes) does not exist (redirects elsewhere)
+            if final_url.rstrip('/') != url.rstrip('/') and final_url.rstrip('/') != expected_url.rstrip('/'):
+                # If the final link is different with verified link and expected link -> localization defect
+                return 'defect', 200, f'Final link - {final_url} is different with expected link and verified link'
+            if final_url.rstrip('/') == expected_url.rstrip('/'):
+                # If the expected localized URL exists as a real page, but the link does not point to it -> localization defect
+                return 'localization_defect', 200, f'Link should point to {expected_url} (localized version exists)'
             else:
-                # Redirected to default or another language
-                return 'success', None, None
+                # No localized version exists, this is expected
+                return 'success', 200, f'No localized version exists - {expected_url}; so redirects to default version: {final_url}'
         else:
-            # 404 or other error
-            return 'success', None, None
-    except Exception:
-        return 'success', None, None
+            # Localization expected link: redirect return 404 or other error: not exist -> no defect
+            return 'success', 200, None
+    except Exception as e:
+        logger.exception(f"❌ Cannot verify expected localization: {e}")
+        return False
 
 
 def detect_language_from_url(url):
@@ -386,7 +379,7 @@ def detect_language_from_url(url):
     for lang, patterns in language_patterns.items():
         for pattern in patterns:
             if pattern in path:
-                return lang.upper()
+                return lang
 
     return "en"
 
@@ -398,8 +391,7 @@ def generate_csv_report(results, base_url):
     filename = f"csv/l10n_{timestamp}.csv"
 
     with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['url', 'link_text', 'status_code', 'status', 'response_time', 'error_message',
-                      'localization_issue', 'base_url']
+        fieldnames = ['url', 'link_text', 'status_code', 'status', 'localization_issue', 'base_url']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         writer.writeheader()
@@ -409,8 +401,6 @@ def generate_csv_report(results, base_url):
                 'link_text': result.get('link_text', ''),
                 'status_code': result.get('status_code', ''),
                 'status': result.get('status', ''),
-                'response_time': result.get('response_time', ''),
-                'error_message': result.get('error_message', ''),
                 'localization_issue': result.get('localization_issue', ''),
                 'base_url': base_url
             })
@@ -423,91 +413,36 @@ def generate_csv_report(results, base_url):
 def index():
     if request.method == "POST":
         localization_url = request.form.get("localization_url", "").strip()
-        test_single_link = request.form.get("test_single_link", "").strip()
         start_time = time.time()
+
+        if not is_valid_url(localization_url):
+            stats = {
+                'warning': f'Input is not a valid URL: {localization_url}'
+            }
+            return render_template_string(HTML_TEMPLATE, stats=stats, links=[])
 
         # Input validation: locale prefix
         if not has_locale_prefix(localization_url):
             stats = {
-                'error': 'Input URL is not localized (must contain locale prefix like /de/, /fr/, etc.)',
-                'base_url': localization_url,
-                'language_detected': None,
-                'page_title': None,
-                'total_links': 0,
-                'working_links': 0,
-                'broken_links': 0,
-                'localization_defects': 0,
-                'success_rate': 0,
-                'processing_time': 0
+                'warning': f'Input URL is not localized (must contain locale prefix like /de/, /fr/, etc.): {localization_url}'
             }
             return render_template_string(HTML_TEMPLATE, stats=stats, links=[])
 
         # Input validation: URL available
         if not is_url_available(localization_url):
             stats = {
-                'error': 'Input URL is not valid or unavailable (must respond with HTTP 200)',
-                'base_url': localization_url,
-                'language_detected': None,
-                'page_title': None,
-                'total_links': 0,
-                'working_links': 0,
-                'broken_links': 0,
-                'localization_defects': 0,
-                'success_rate': 0,
-                'processing_time': 0
+                'warning': f'Input URL is not valid or unavailable (must respond with HTTP 200): {localization_url}'
             }
             return render_template_string(HTML_TEMPLATE, stats=stats, links=[])
 
         # --- Parse locale ---
-        locale_match = re.search(r'/([a-z]{2})(?:-[a-z]{2})?/', urlparse(localization_url).path)
-        locale = locale_match.group(1) if locale_match else None
-
-        # --- Single Link Test Mode ---
-        if test_single_link:
-            # Validate single link
-            if not is_url_available(test_single_link):
-                stats = {
-                    'error': 'Single test link is not a valid http(s) URL or unavailable',
-                    'base_url': localization_url,
-                    'language_detected': locale,
-                    'page_title': 'Single Link Test',
-                    'total_links': 1,
-                    'working_links': 0,
-                    'broken_links': 1,
-                    'localization_defects': 0,
-                    'success_rate': 0,
-                    'processing_time': 0
-                }
-                return render_template_string(HTML_TEMPLATE, stats=stats, links=[])
-
-            # Check localization for the single link
-            status, status_code, defect = check_link_localization(test_single_link, localization_url, locale)
-            processing_time = time.time() - start_time
-            test_result = {
-                'url': test_single_link,
-                'link_text': 'Single Link Test',
-                'status': status,
-                'status_code': status_code,
-                'localization_issue': defect
-            }
-            stats = {
-                'base_url': localization_url,
-                'language_detected': locale,
-                'page_title': 'Single Link Test',
-                'total_links': 1,
-                'working_links': 1 if status == 'success' else 0,
-                'broken_links': 1 if status == 'defect' else 0,
-                'localization_defects': 1 if status == 'defect' else 0,
-                'success_rate': 100 if status == 'success' else 0,
-                'processing_time': processing_time
-            }
-            return render_template_string(HTML_TEMPLATE, stats=stats, links=[test_result], report_filename=None)
+        locale = detect_language_from_url(localization_url)
 
         # --- Full Page Test Mode ---
         links_data, page_title = extract_links_from_main_content(localization_url)
         if not links_data:
             stats = {
-                'error': 'No links found or error fetching page',
+                'warning': 'No links found or error fetching page',
                 'base_url': localization_url,
                 'language_detected': locale,
                 'page_title': page_title,
@@ -520,6 +455,7 @@ def index():
             }
             return render_template_string(HTML_TEMPLATE, stats=stats, links=[])
 
+        # Return the status, status code, defect information for each link after extracting link list from main content
         results = []
         for link in links_data:
             status, status_code, defect = check_link_localization(link['url'], localization_url, locale)
@@ -531,9 +467,11 @@ def index():
                 'localization_issue': defect
             })
 
+        # Response the result information
         total_links = len(results)
         working_links = len([r for r in results if r['status'] == 'success'])
         defects = len([r for r in results if r['status'] == 'defect'])
+        localization_defects = len([r for r in results if r['status'] == 'localization_defect'])
         processing_time = time.time() - start_time
         stats = {
             'base_url': localization_url,
@@ -542,7 +480,7 @@ def index():
             'total_links': total_links,
             'working_links': working_links,
             'broken_links': defects,
-            'localization_defects': defects,
+            'localization_defects': localization_defects,
             'success_rate': (working_links / total_links * 100) if total_links else 0,
             'processing_time': processing_time
         }
@@ -551,6 +489,7 @@ def index():
 
     return render_template_string(HTML_TEMPLATE, stats=None, links=None)
 
+
 if __name__ == "__main__":
     logger.info("Starting Localization Link Checker")
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=1000)
