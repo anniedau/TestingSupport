@@ -278,12 +278,14 @@ def extract_links_from_main_content(url):
     Extract all the links from main content.
     """
 
+    global links, soup
+
     def extract_links(soup):
         """
         Try requests first, fallback to Selenium if no links found.
         """
         links = []
-        for source in main.find_all('a', href=True):
+        for source in get_main_content_sections(soup):
             for link in source.find_all('a', href=True):
                 href = link.get('href').strip()
                 link_text = link.get_text().strip()
@@ -338,6 +340,27 @@ def extract_links_from_main_content(url):
 
         logger.info(f"🔗 Found {len(unique_links)} valid links to check")
         return unique_links, soup.title.string if soup.title else "No title"
+
+
+def get_main_content_sections(soup):
+    """Get main or section or body tags."""
+    main = soup.find('main')
+    if not main:
+        main = soup.body.find('main')
+    if main and hasattr(main, 'find_all'):
+        logger.info("Extracting links from <main> tag.")
+        return [main]
+    elif soup.body:
+        sections = soup.body.find_all('section')
+        if sections:
+            logger.info("No <main> tag found. Extracting links from <section> tags in <body>.")
+            return sections
+        else:
+            logger.info("No <main> or <section> tags found. Extracting links from <body>.")
+            return [soup.body]
+    else:
+        logger.warning("No <main>, <section>, or <body> tag found. Extracting links from full page.")
+        return [soup]
 
 
 def check_link_localization(link_url, base_url, locale):
