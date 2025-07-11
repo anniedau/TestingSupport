@@ -10,6 +10,8 @@ from urllib.parse import urlunparse
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, render_template_string
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 
 # Create folders if they don't exist
 os.makedirs('logs', exist_ok=True)
@@ -129,7 +131,13 @@ HTML_TEMPLATE = """
                 {% if result.link_text %}
                 <br><small>Link Text: "{{ result.link_text[:50] }}{% if result.link_text|length > 50 %}...{% endif %}"</small>
                 {% endif %}
-                {% if result.localization_issue %}
+                {% if result.localization_issue and result.status == 'success' %}
+                <br><small class="warning-status">Warning: {{ result.localization_issue }}</small>
+                {% endif %}
+                {% if result.localization_issue and result.status == 'defect' %}
+                <br><small class="warning-status">Warning: {{ result.localization_issue }}</small>
+                {% endif %}
+                {% if result.localization_issue and result.status == 'localization_defect' %}
                 <br><small class="defect-status">Localization Issue: {{ result.localization_issue }}</small>
                 {% endif %}
             </div>
@@ -140,6 +148,22 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
+
+
+def get_rendered_html(url, wait_time=15):
+    options = Options()
+    options.headless = True
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(options=options)
+    try:
+        driver.get(url)
+        time.sleep(wait_time)  # Wait for JS to load. You can use WebDriverWait for more advanced waits.
+        html = driver.page_source
+    finally:
+        driver.quit()
+    return html
+
 
 def is_valid_url(url):
     regex = re.compile(
@@ -165,14 +189,27 @@ def is_url_available(url):
             return False
         if len(url) > 2048:
             return False
-        for pattern in CONFIG['exclude_patterns']:
-            if re.search(pattern, url, re.IGNORECASE):
-                return False
         headers = {'User-Agent': CONFIG['user_agent']}
         response = requests.head(url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
         return response.status_code == 200
     except Exception as e:
         logger.exception(f"❌ URL available check failed: {e}")
+        return False
+
+
+def get_url_final_redirect(url):
+    """Check if the link is redirect to another link or not"""
+    headers = {'User-Agent': CONFIG['user_agent']}
+    # Use GET to follow redirects and get the final URL
+    response = requests.get(url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
+    final_url = response.url
+
+    if response.status_code == 200:
+        if final_url.rstrip('/') != url.rstrip('/'):
+            return final_url
+        else:
+            return True
+    else:
         return False
 
 
@@ -237,36 +274,54 @@ def get_expected_localization_url(url, base_url):
 
 
 def extract_links_from_main_content(url):
-    """Extract all links from the <main> tag of a webpage."""
+    """
+    Extract all the links from main content.
+    """
+
+    def extract_links(soup):
+        """
+        Try requests first, fallback to Selenium if no links found.
+        """
+        links = []
+        for source in main.find_all('a', href=True):
+            for link in source.find_all('a', href=True):
+                href = link.get('href').strip()
+                link_text = link.get_text().strip()
+                # Exclude links matching exclude_patterns (see next section)
+                if any(re.search(pattern, href, re.IGNORECASE) for pattern in CONFIG['exclude_patterns']):
+                    continue
+                links.append({
+                    'url': urljoin(url, href),
+                    'link_text': link_text,
+                    'original_href': href
+                })
+        return links
+
+    # --- Fast path: requests ---
     try:
         logger.info(f"🌐 Fetching webpage: {url}")
         headers = {'User-Agent': CONFIG['user_agent']}
         response = requests.get(url, timeout=CONFIG['timeout'], headers=headers)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
+        links = extract_links(soup)
+        if links:
+            logger.info(f"🔗 Found {len(links)} links with requests.")
+            return links, soup.title.string if soup.title else "No title"
 
-        # Extract links from the <main> tag
-        main = soup.find('main')
-        if not main or not hasattr(main, 'find_all'):
-            logger.warning("No <main> tag found, falling back to <body> or full page.")
-            main = soup.body if soup.body else soup  # fallback to whole page
+    except Exception as e:
+        logger.warning(f"Requests failed or no links found: {e}")
 
-        if not hasattr(main, 'find_all'):
-            logger.exception("Main content is not a tag, cannot extract links.")
-            return [], "Error"
-
-        links = []
-        for link in main.find_all('a', href=True):
-            href = link.get('href').strip()
-            link_text = link.get_text().strip()
-            # ❌ Skip links containing ?pag=
-            if 'pag=' in href:
-                continue
-            links.append({
-                'url': urljoin(url, href),
-                'link_text': link_text,
-                'original_href': href
-            })
+    # --- Slow path: Selenium ---
+    try:
+        logger.info(f"🌐 Fetching webpage (Selenium): {url}")
+        html = get_rendered_html(url, wait_time=15)
+        soup = BeautifulSoup(html, 'html.parser')
+        links = extract_links(soup)
+        logger.info(f"🔗 Found {len(links)} links with Selenium.")
+        return links, soup.title.string if soup.title else "No title"
+    except Exception as e:
+        logger.exception(f"❌ Error fetching webpage with Selenium: {e}")
 
         # Remove duplicates while preserving order
         seen = set()
@@ -283,10 +338,6 @@ def extract_links_from_main_content(url):
 
         logger.info(f"🔗 Found {len(unique_links)} valid links to check")
         return unique_links, soup.title.string if soup.title else "No title"
-
-    except Exception as e:
-        logger.exception(f"❌ Error fetching webpage: {e}")
-        return [], "Error"
 
 
 def check_link_localization(link_url, base_url, locale):
@@ -310,7 +361,7 @@ def check_link_localization(link_url, base_url, locale):
                         return 'success', 200, None
                     # If the final URL is different with the verify link -> success, but warning redirect issue
                     if final_url.rstrip('/') != link_url.rstrip('/'):
-                        return 'success', 200, f'Redirect: Final link is redirect to other valid link - {final_url}'
+                        return 'success', 200, f'Redirect - Final link is redirect to other valid link - {final_url}'
                 # If the final link responds non-200 -> localization defect
                 else:
                     return 'localization_defect', 200, f'Final link should be the default link - {final_url}; but verify link is {link_url}'
@@ -343,11 +394,11 @@ def check_localization_consistency(url, base_url):
             final_url = response.url
 
             if response.status_code == 200:
-                # If the final link is different with non-localized link and expect localized link -> localization defect
+                # If the final link is different with non-localized link and expected localized link -> localization defect
                 if final_url.rstrip('/') != url.rstrip('/') and final_url.rstrip('/') != expected_url.rstrip('/'):
-                    return 'localization_defect', 200, f'Final link - {final_url} is different with non-localized link and expect localized link'
+                    return 'localization_defect', 200, f'Final link - {final_url} is different with non-localized link and expected localized link {expected_url}'
                 # If the final link and the expected localized URL exists as a real page, but the link does not point to it -> localization defect
-                if final_url.rstrip('/') != url.rstrip('/')  and final_url.rstrip('/') == expected_url.rstrip('/'):
+                if final_url.rstrip('/') != url.rstrip('/') and final_url.rstrip('/') == expected_url.rstrip('/'):
                     return 'localization_defect', 200, f'Link should point to {expected_url} (localized version exists)'
                 else:
                     # If the final link is different with expected localized link -> no localized version exists, redirect to default version
@@ -360,7 +411,7 @@ def check_localization_consistency(url, base_url):
             return 'defect', resp.status_code, f"Localized link responds with fail status {resp.status_code}"
     except Exception as e:
         logger.exception(f"❌ Cannot verify expected localization: {e}")
-        return False
+        return 'error', None, f"Cannot verify expected localization: {e}"
 
 
 def detect_language_from_url(url):
@@ -436,6 +487,14 @@ def index():
             }
             return render_template_string(HTML_TEMPLATE, stats=stats, links=[])
 
+        # Check finalized redirect link
+        if get_url_final_redirect(localization_url) != True or False:
+            stats = {
+                'warning': f'Input URL is redirect to another valid link: {get_url_final_redirect(localization_url)}.\n'
+                           f'Input url: {localization_url}'
+            }
+            return render_template_string(HTML_TEMPLATE, stats=stats, links=[])
+
         # --- Parse locale ---
         locale = detect_language_from_url(localization_url)
 
@@ -443,16 +502,7 @@ def index():
         links_data, page_title = extract_links_from_main_content(localization_url)
         if not links_data:
             stats = {
-                'warning': 'No links found or error fetching page',
-                'base_url': localization_url,
-                'language_detected': locale,
-                'page_title': page_title,
-                'total_links': 0,
-                'working_links': 0,
-                'broken_links': 0,
-                'localization_defects': 0,
-                'success_rate': 0,
-                'processing_time': 0
+                'warning': f'No links found: no <main>, <section>, or <body> tags with links in: {localization_url}'
             }
             return render_template_string(HTML_TEMPLATE, stats=stats, links=[])
 
@@ -471,7 +521,7 @@ def index():
         # Response the result information
         total_links = len(results)
         working_links = len([r for r in results if r['status'] == 'success'])
-        defects = len([r for r in results if r['status'] in ('error','defect')])
+        defects = len([r for r in results if r['status'] in ('error', 'defect')])
         localization_defects = len([r for r in results if r['status'] == 'localization_defect'])
         processing_time = time.time() - start_time
         stats = {
@@ -493,4 +543,4 @@ def index():
 
 if __name__ == "__main__":
     logger.info("Starting Localization Link Checker")
-    app.run(debug=True, host="0.0.0.0", port=1000)
+    app.run(debug=True, host="0.0.0.0", port=4500)
