@@ -116,12 +116,6 @@ HTML_TEMPLATE = """
             <p><strong>Processing Time:</strong> {{ "%.2f"|format(stats.processing_time) }}s</p>
         </div>
         
-        {% if report_filename %}
-        <div style="margin: 20px 0;">
-            <a href="{{ report_filename }}" download class="export-btn">📄 Download CSV Report</a>
-        </div>
-        {% endif %}
-        
         <br>
         <h3>🔍 Link Results</h3>
         <div>
@@ -311,17 +305,20 @@ def check_link_localization(link_url, base_url, locale):
                 final_url = response.url
 
                 if response.status_code == 200:
-                    # If the final URL is the same with the input link -> success
+                    # If the final URL is the same with the verify link -> success
                     if final_url.rstrip('/') == link_url.rstrip('/'):
                         return 'success', 200, None
-                    else:
-                        # If the final link is different with the input link -> localization defect
-                        return 'localization_defect', 200, f'Final link should be default link - {final_url}; but input link is {link_url}'
+                    # If the final URL is different with the verify link -> success, but warning redirect issue
+                    if final_url.rstrip('/') != link_url.rstrip('/'):
+                        return 'success', 200, f'Redirect: Final link is redirect to other valid link - {final_url}'
+                # If the final link responds non-200 -> localization defect
+                else:
+                    return 'localization_defect', 200, f'Final link should be the default link - {final_url}; but verify link is {link_url}'
             else:
                 # If status code non-200 -> defect
-                return 'defect', resp.status_code, f"Localized link responds with status {resp.status_code}"
+                return 'defect', resp.status_code, f"Localized link responds with fail status {resp.status_code}"
         except Exception as e:
-            return 'defect', None, f"Error checking link: {e}"
+            return 'error', None, f"Error checking link: {e}"
 
     # 2. Not localized: check the actual localization redirect; try to generate localized version
     return check_localization_consistency(link_url, base_url)
@@ -339,24 +336,28 @@ def check_localization_consistency(url, base_url):
             return 'success', 200, None
 
         headers = {'User-Agent': CONFIG['user_agent']}
-        # Use GET to follow redirects and get the final URL
-        response = requests.get(expected_url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
-        final_url = response.url
+        resp = requests.head(expected_url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
+        if resp.status_code == 200:
+            # Use GET to follow redirects and get the final URL
+            response = requests.get(expected_url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
+            final_url = response.url
 
-        if response.status_code == 200:
-            # If the expected localized URL (without trailing slashes) does not exist (redirects elsewhere)
-            if final_url.rstrip('/') != url.rstrip('/') and final_url.rstrip('/') != expected_url.rstrip('/'):
-                # If the final link is different with verified link and expected link -> localization defect
-                return 'defect', 200, f'Final link - {final_url} is different with expected link and verified link'
-            if final_url.rstrip('/') == expected_url.rstrip('/'):
-                # If the expected localized URL exists as a real page, but the link does not point to it -> localization defect
-                return 'localization_defect', 200, f'Link should point to {expected_url} (localized version exists)'
+            if response.status_code == 200:
+                # If the final link is different with non-localized link and expect localized link -> localization defect
+                if final_url.rstrip('/') != url.rstrip('/') and final_url.rstrip('/') != expected_url.rstrip('/'):
+                    return 'localization_defect', 200, f'Final link - {final_url} is different with non-localized link and expect localized link'
+                # If the final link and the expected localized URL exists as a real page, but the link does not point to it -> localization defect
+                if final_url.rstrip('/') != url.rstrip('/')  and final_url.rstrip('/') == expected_url.rstrip('/'):
+                    return 'localization_defect', 200, f'Link should point to {expected_url} (localized version exists)'
+                else:
+                    # If the final link is different with expected localized link -> no localized version exists, redirect to default version
+                    return 'success', 200, f'No localized version exists - {expected_url}; so redirects to default version: {final_url}'
             else:
-                # No localized version exists, this is expected
-                return 'success', 200, f'No localized version exists - {expected_url}; so redirects to default version: {final_url}'
+                # Localization expected link: redirect return 404 or other error: not exist -> no defect
+                return 'success', response.status_code, f'Localized link responds with fail status {resp.status_code}'
         else:
-            # Localization expected link: redirect return 404 or other error: not exist -> no defect
-            return 'success', 200, None
+            # If status code non-200 -> defect
+            return 'defect', resp.status_code, f"Localized link responds with fail status {resp.status_code}"
     except Exception as e:
         logger.exception(f"❌ Cannot verify expected localization: {e}")
         return False
@@ -470,7 +471,7 @@ def index():
         # Response the result information
         total_links = len(results)
         working_links = len([r for r in results if r['status'] == 'success'])
-        defects = len([r for r in results if r['status'] == 'defect'])
+        defects = len([r for r in results if r['status'] in ('error','defect')])
         localization_defects = len([r for r in results if r['status'] == 'localization_defect'])
         processing_time = time.time() - start_time
         stats = {
