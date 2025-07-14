@@ -387,7 +387,7 @@ def check_link_localization(link_url, base_url, locale):
                         return 'success', 200, f'Redirect - Final link is redirect to other valid link - {final_url}'
                 # If the final link responds non-200 -> localization defect
                 else:
-                    return 'localization_defect', 200, f'Final link should be the default link - {final_url}; but verify link is {link_url}'
+                    return 'localization_defect', response.status_code, f'Final link should be the default link - {final_url}; but verify link is {link_url}'
             else:
                 # If status code non-200 -> defect
                 return 'defect', resp.status_code, f"Localized link responds with fail status {resp.status_code}"
@@ -428,7 +428,7 @@ def check_localization_consistency(url, base_url):
                     return 'success', 200, f'No localized version exists - {expected_url}; so redirects to default version: {final_url}'
             else:
                 # Localization expected link: redirect return 404 or other error: not exist -> no defect
-                return 'success', response.status_code, f'Localized link responds with fail status {resp.status_code}'
+                return 'success', response.status_code, f'Localized link responds with fail status {response.status_code}'
         else:
             # If status code non-200 -> defect
             return 'defect', resp.status_code, f"Localized link responds with fail status {resp.status_code}"
