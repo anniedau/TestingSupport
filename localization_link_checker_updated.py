@@ -246,6 +246,10 @@ class LinkChecker:
                 pass
             self.chrome_driver = None
 
+    def is_file_link(self, url: str) -> bool:
+        """Return True if the URL points to a file (pdf, zip, docx, etc.)"""
+        return bool(re.search(r'\.(pdf|zip|docx?|xlsx?|pptx?|exe|rar|tar\.gz|7z)$', url, re.IGNORECASE))
+
     def is_valid_url(self, url: str) -> bool:
         """Check if URL is valid"""
         try:
@@ -268,17 +272,6 @@ class LinkChecker:
             if any(pattern in path for pattern in patterns):
                 return lang
         return "en"
-
-    def check_url_accessibility(self, url: str) -> Tuple[bool, Optional[str]]:
-        """Check if URL is accessible"""
-        try:
-            response = self.session.head(url, timeout=CONFIG['timeout'], allow_redirects=True)
-            if response.status_code == 200:
-                return True, None
-            else:
-                return False, f"HTTP {response.status_code}"
-        except requests.exceptions.RequestException as e:
-            return False, str(e)
 
     def get_url_final_redirect(self, url: str):
         """Check if the link is redirect to another link or not"""
@@ -362,7 +355,6 @@ class LinkChecker:
                     'link_text': link_text,
                     'original_href': href
                 })
-        return links
 
         # Remove duplicates and limit
         seen = set()
@@ -410,6 +402,7 @@ class LinkChecker:
                     'localization_issue': f"Link is broken (HTTP {response.status_code})"
                 }
             parsed_link = urlparse(link_url)
+            path = parsed_link.path.lower()
 
             # Check if the link not containing "nakivo.com" in its domain -> return message, do not run localization checks for these links
             if "nakivo.com" not in parsed_link.netloc.lower():
@@ -419,8 +412,14 @@ class LinkChecker:
                     'localization_issue': f"Not match nakivo.com"
                 }
 
-            # Now only check localization for nakivo.com links:
-            # Check if link is already localized
+            # --- Custom logic for localized file links ---
+            # e.g., /file_es.pdf, /file-es.pdf, /file_ES.pdf, /file-ES.pdf
+            locale_pattern = rf"(_|-){locale}\.pdf$"
+            if self.is_file_link(link_url) and re.search(locale_pattern, path, re.IGNORECASE):
+                return self._check_localized_link(link_url)
+
+            # --- Normal logic for HTML links ---
+            # Check if link is already localized (for HTML pages)
             if re.match(rf'^/{locale}(/|$)', parsed_link.path):
                 return self._check_localized_link(link_url)
             else:
@@ -436,10 +435,9 @@ class LinkChecker:
             }
 
     def _check_localized_link(self, link_url: str) -> Dict:
-        """Check already localized link"""
+        """Check already localized link, with custom logic for files"""
         try:
             response = self.session.get(link_url, timeout=CONFIG['timeout'], allow_redirects=True)
-
             if response.status_code == 200:
                 # If the final URL is the same with the verify link -> success
                 if response.url.rstrip('/') == link_url.rstrip('/'):
@@ -449,7 +447,7 @@ class LinkChecker:
                         'localization_issue': None
                     }
                 # If the final URL is different with the verify link -> success, but warning redirect issue
-                elif response.url.rstrip('/') != link_url.rstrip('/'):
+                if response.url.rstrip('/') != link_url.rstrip('/'):
                     return {
                         'status': Status.SUCCESS,
                         'status_code': 200,
@@ -466,7 +464,7 @@ class LinkChecker:
                 return {
                     'status': Status.LOCALIZATION_DEFECT,
                     'status_code': response.status_code,
-                    'localization_issue': f"Localized link returns {response.status_code}"
+                    'localization_issue': f"Localized link returns {response.status_code}, {response.url}"
                 }
         except Exception as e:
             return {
@@ -491,49 +489,39 @@ class LinkChecker:
         if expected_localized and expected_localized != link_url:
             # Check if localized version exists
             try:
-                loc_response = self.session.head(expected_localized, timeout=CONFIG['timeout'],
-                                                 allow_redirects=True)
-                if loc_response.status_code == 200:
-                    resp = self.session.get(expected_localized, timeout=CONFIG['timeout'], allow_redirects=True)
-                    final_url = resp.url
+                resp = self.session.get(expected_localized, timeout=CONFIG['timeout'], allow_redirects=True)
+                final_url = resp.url
 
-                    if resp.status_code == 200:
-                        # If the final link is different with non-localized link and expected localized link -> localization defect
-                        if final_url.rstrip('/') != link_url.strip('/') and final_url.rstrip(
-                                '/') != expected_localized.rstrip('/'):
-                            return {
-                                'status': Status.LOCALIZATION_DEFECT,
-                                'status_code': 200,
-                                'localization_issue': f"Final link - {final_url} is different with non-localized link and expected localized link {expected_localized}"
-                            }
-                        # If the final link and the expected localized URL exists as a real page, but the link does not point to it -> localization defect
-                        if final_url.rstrip('/') != link_url.rstrip('/') and final_url.rstrip(
-                                '/') == expected_localized.rstrip('/'):
-                            return {
-                                'status': Status.LOCALIZATION_DEFECT,
-                                'status_code': 200,
-                                'localization_issue': f"Should link to localized version: {expected_localized}"
-                            }
-                        else:
-                            # If the final link is different with expected localized link -> no localized version exists, redirect to default version
-                            return {
-                                'status': Status.SUCCESS,
-                                'status_code': 200,
-                                'localization_issue': f"No localized version exists - {expected_localized}; so redirects to default version: {final_url}"
-                            }
+                if resp.status_code == 200:
+                    # If the final link is different with non-localized link and expected localized link -> localization defect
+                    if final_url.rstrip('/') != link_url.strip('/') and final_url.rstrip(
+                            '/') != expected_localized.rstrip('/'):
+                        return {
+                            'status': Status.LOCALIZATION_DEFECT,
+                            'status_code': 200,
+                            'localization_issue': f"Final link - {final_url} is different with non-localized link and expected localized link {expected_localized}"
+                        }
+                    # If the final link and the expected localized URL exists as a real page, but the link does not point to it -> localization defect
+                    if final_url.rstrip('/') != link_url.rstrip('/') and final_url.rstrip(
+                            '/') == expected_localized.rstrip('/'):
+                        return {
+                            'status': Status.LOCALIZATION_DEFECT,
+                            'status_code': 200,
+                            'localization_issue': f"Should link to localized version: {expected_localized}"
+                        }
                     else:
-                        # Localization expected link: redirect return 404 or other error: not exist -> no defect
+                        # If the final link is different with expected localized link -> no localized version exists, redirect to default version
                         return {
                             'status': Status.SUCCESS,
-                            'status_code': resp.status_code,
-                            'localization_issue': f"Localized link responds with get fail status {resp.status_code}"
+                            'status_code': 200,
+                            'localization_issue': f"No localized version exists - {expected_localized}; so redirects to default version: {final_url}"
                         }
                 else:
-                    # If status code non-200 -> error
+                    # Localization expected link: redirect return 404 or other error: not exist -> no defect
                     return {
-                        'status': Status.ERROR,
-                        'status_code': loc_response.status_code,
-                        'localization_issue': f"Localized link responds with head fail status {loc_response.status_code}"
+                        'status': Status.SUCCESS,
+                        'status_code': None,
+                        'localization_issue': f"No localized version exists - {expected_localized}, returns status code: {resp.status_code}"
                     }
             except Exception as e:
                 return {
@@ -549,10 +537,20 @@ class LinkChecker:
             }
 
     def _get_expected_localized_url(self, url: str, locale: str) -> Optional[str]:
-        """Get expected localized URL"""
+        """Get expected localized URL with custom PDF logic"""
         parsed = urlparse(url)
+        path = parsed.path
 
-        # Simple approach: add locale to path if same domain
+        # Custom logic for PDF files
+        if path.lower().endswith('.pdf'):
+            base_path = path[:-4]  # Remove .pdf
+            if locale.lower() == 'es':
+                localized_path = f"{base_path}_ES.pdf"
+            else:
+                localized_path = f"{base_path}-{locale}.pdf"
+            return f"{parsed.scheme}://{parsed.netloc}{localized_path}"
+
+        # Default: add locale to path if not already present
         if not re.match(rf'^/{locale}(/|$)', parsed.path):
             localized_path = f"/{locale}{parsed.path}"
             return f"{parsed.scheme}://{parsed.netloc}{localized_path}"
@@ -599,18 +597,12 @@ def index():
 
             # Validation
             if not checker.is_valid_url(localization_url):
-                return render_template_string(HTML_TEMPLATE, stats={'error': f'Invalid URL format {localization_url}'},
+                return render_template_string(HTML_TEMPLATE, stats={'error': f'Invalid URL format: {localization_url}'},
                                               links=[])
 
             if not checker.has_locale_prefix(localization_url):
                 return render_template_string(HTML_TEMPLATE, stats={'error': f'URL must contain locale prefix (e.g., '
                                                                              f'/de/, /fr/): {localization_url}'},
-                                              links=[])
-
-            accessible, error_msg = checker.check_url_accessibility(localization_url)
-            if not accessible:
-                return render_template_string(HTML_TEMPLATE,
-                                              stats={'error': f'URL {localization_url} not accessible: {error_msg}'},
                                               links=[])
 
             # Check finalized redirect link
