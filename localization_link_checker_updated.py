@@ -273,7 +273,7 @@ class LinkChecker:
                 return lang
         return "en"
 
-    def get_url_final_redirect(self, url: str) -> Dict:
+    def is_url_redirect(self, url: str) -> Dict:
         """Simple function to check if URL redirects to another URL"""
         try:
             # Use GET to follow redirects and get the final URL
@@ -284,9 +284,10 @@ class LinkChecker:
             # Simple comparison - normalize URLs
             original_url = url.rstrip('/')
             final_url = response.url.rstrip('/')
+            is_redirect = final_url != original_url
 
             return {
-                'redirected': final_url != original_url,
+                'redirected': is_redirect,
                 'final_url': response.url,
                 'status_code': 200,
                 'error': None
@@ -498,24 +499,27 @@ class LinkChecker:
                 final_url = resp.url
 
                 if resp.status_code == 200:
+                    # Normalize URLs by removing fragments for comparison
+                    original_link_clean = self._remove_fragments(link_url)
+                    expected_localized_clean = self._remove_fragments(expected_localized)
+                    final_url_clean = self._remove_fragments(final_url)
+
                     # If the final link is different with non-localized link and expected localized link -> localization defect
-                    if final_url.rstrip('/') != link_url.strip('/') and final_url.rstrip(
-                            '/') != expected_localized.rstrip('/'):
+                    if final_url_clean != original_link_clean and final_url_clean != expected_localized_clean:
                         return {
                             'status': Status.LOCALIZATION_DEFECT,
                             'status_code': 200,
                             'localization_issue': f"Final link - {final_url} is different with non-localized link and expected localized link {expected_localized}"
                         }
                     # If the final link and the expected localized URL exists as a real page, but the link does not point to it -> localization defect
-                    elif final_url.rstrip('/') != link_url.rstrip('/') and final_url.rstrip(
-                            '/') == expected_localized.rstrip('/'):
+                    elif final_url_clean != original_link_clean and final_url_clean == expected_localized_clean:
                         return {
                             'status': Status.LOCALIZATION_DEFECT,
                             'status_code': 200,
                             'localization_issue': f"Should link to localized version: {expected_localized}"
                         }
                     # If the final link is different with expected localized link, the same with non-localized link -> no localized version exists, redirect to default version
-                    # final_url.rstrip('/') == link_url.rstrip('/') and final_url.rstrip('/') == expected_localized.rstrip('/'):
+                    # final_url_clean == original_link_clean and final_url_clean == expected_localized_clean:
                     else:
                         return {
                             'status': Status.SUCCESS,
@@ -541,6 +545,16 @@ class LinkChecker:
                 'status_code': 200,
                 'localization_issue': f"No localized version exists - {expected_localized}"
             }
+
+    def _remove_fragments(self, url: str) -> str:
+        """Remove query parameters and fragments from URL for comparison"""
+        try:
+            parsed = urlparse(url)
+            # Reconstruct URL without query and fragment
+            clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            return clean_url.rstrip('/')
+        except:
+            return url.rstrip('/')
 
     def _get_expected_localized_url(self, url: str, locale: str) -> Optional[str]:
         """Get expected localized URL with custom PDF logic"""
@@ -612,7 +626,7 @@ def index():
                                               links=[])
 
             # Check finalized redirect link
-            redirect_info = checker.get_url_final_redirect(localization_url)
+            redirect_info = checker.is_url_redirect(localization_url)
 
             # If there's an error accessing the URL
             if redirect_info['error']:
