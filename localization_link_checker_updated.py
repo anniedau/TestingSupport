@@ -273,20 +273,31 @@ class LinkChecker:
                 return lang
         return "en"
 
-    def get_url_final_redirect(self, url: str):
-        """Check if the link is redirect to another link or not"""
-        headers = {'User-Agent': CONFIG['user_agent']}
-        # Use GET to follow redirects and get the final URL
-        response = requests.get(url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
-        final_url = response.url
+    def get_url_final_redirect(self, url: str) -> Dict:
+        """Simple function to check if URL redirects to another URL"""
+        try:
+            # Use GET to follow redirects and get the final URL
+            headers = {'User-Agent': CONFIG['user_agent']}
+            response = self.session.get(url, timeout=CONFIG['timeout'], headers=headers, allow_redirects=True)
+            response.raise_for_status()
 
-        if response.status_code == 200:
-            if final_url.rstrip('/') != url.rstrip('/'):
-                return final_url
-            else:
-                return True
-        else:
-            return False
+            # Simple comparison - normalize URLs
+            original_url = url.rstrip('/')
+            final_url = response.url.rstrip('/')
+
+            return {
+                'redirected': final_url != original_url,
+                'final_url': response.url,
+                'status_code': 200,
+                'error': None
+            }
+        except Exception as e:
+            return {
+                'redirected': False,
+                'final_url': None,
+                'status_code': None,
+                'error': str(e)
+            }
 
     def extract_links(self, url: str) -> Tuple[List[Dict], str]:
         """Extract links from webpage"""
@@ -447,17 +458,11 @@ class LinkChecker:
                         'localization_issue': None
                     }
                 # If the final URL is different with the verify link -> success, but warning redirect issue
-                if response.url.rstrip('/') != link_url.rstrip('/'):
+                else:
                     return {
                         'status': Status.SUCCESS,
                         'status_code': 200,
                         'localization_issue': f"Redirected to: {response.url}"
-                    }
-                else:
-                    return {
-                        'status': Status.WARNING,
-                        'status_code': 200,
-                        'localization_issue': f"Other condition for: {response.url}"
                     }
             # If the final link responds non-200 -> localization defect
             else:
@@ -470,7 +475,7 @@ class LinkChecker:
             return {
                 'status': Status.ERROR,
                 'status_code': None,
-                'localization_issue': f"Error: {str(e)}"
+                'localization_issue': f"Error check localized link: {str(e)}"
             }
 
     def _check_non_localized_link(self, link_url: str, base_url: str, locale: str) -> Dict:
@@ -502,15 +507,16 @@ class LinkChecker:
                             'localization_issue': f"Final link - {final_url} is different with non-localized link and expected localized link {expected_localized}"
                         }
                     # If the final link and the expected localized URL exists as a real page, but the link does not point to it -> localization defect
-                    if final_url.rstrip('/') != link_url.rstrip('/') and final_url.rstrip(
+                    elif final_url.rstrip('/') != link_url.rstrip('/') and final_url.rstrip(
                             '/') == expected_localized.rstrip('/'):
                         return {
                             'status': Status.LOCALIZATION_DEFECT,
                             'status_code': 200,
                             'localization_issue': f"Should link to localized version: {expected_localized}"
                         }
+                    # If the final link is different with expected localized link, the same with non-localized link -> no localized version exists, redirect to default version
+                    # final_url.rstrip('/') == link_url.rstrip('/') and final_url.rstrip('/') == expected_localized.rstrip('/'):
                     else:
-                        # If the final link is different with expected localized link -> no localized version exists, redirect to default version
                         return {
                             'status': Status.SUCCESS,
                             'status_code': 200,
@@ -527,7 +533,7 @@ class LinkChecker:
                 return {
                     'status': Status.ERROR,
                     'status_code': None,
-                    'localization_issue': f"Error: {str(e)}"
+                    'localization_issue': f"Error check non-localized link: {str(e)}"
                 }
         else:
             return {
@@ -606,12 +612,19 @@ def index():
                                               links=[])
 
             # Check finalized redirect link
-            if checker.get_url_final_redirect(localization_url) != True or False:
-                stats = {
-                    'warning': f'Input URL is redirect to another valid link: {checker.get_url_final_redirect(localization_url)}.\n'
-                               f'Input url: {localization_url}'
-                }
-                return render_template_string(HTML_TEMPLATE, stats=stats, links=[])
+            redirect_info = checker.get_url_final_redirect(localization_url)
+
+            # If there's an error accessing the URL
+            if redirect_info['error']:
+                return render_template_string(HTML_TEMPLATE,
+                                              stats={'error': f'Cannot access URL: {redirect_info["error"]}'},
+                                              links=[])
+
+            # If URL redirects to a different URL
+            if redirect_info['redirected']:
+                return render_template_string(HTML_TEMPLATE, stats={
+                    'warning': f'URL redirects to other link: {redirect_info["final_url"]}'
+                }, links=[])
 
             # Extract links
             links_data, page_title = checker.extract_links(localization_url)
