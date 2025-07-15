@@ -623,7 +623,7 @@ def index():
             # If URL redirects to a different URL
             if redirect_info['redirected']:
                 return render_template_string(HTML_TEMPLATE, stats={
-                    'warning': f'URL redirects to other link: {redirect_info["final_url"]}'
+                    'warning': f'URL redirects to other link: {redirect_info["final_url"]}. Input link: {localization_url}'
                 }, links=[])
 
             # Extract links
