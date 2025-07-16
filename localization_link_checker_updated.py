@@ -88,7 +88,7 @@ HTML_TEMPLATE = """
         .success-status { color: #28a745; font-weight: bold; }
         .warning-status { color: #ffc000; font-weight: bold; }
         .defect-status { color: #fd7e14; font-weight: bold; }
-        .example { font-style: italic; color: #666; margin-top: 5px; }
+        .example { font-style: italic; color: #666; margin-top: 5px; font-size: 14px;}
         .stats { background: #e9ecef; padding: 20px; border-radius: 6px; margin: 20px 0; }
         .stats h3 { margin-top: 0; color: #495057; }
         .link-item { padding: 10px; border-bottom: 1px solid #eee; }
@@ -100,13 +100,15 @@ HTML_TEMPLATE = """
         .localization-info { background: #d1ecf1; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #17a2b8; }
         .test-section { background: #e3f2fd; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #2196f3; }
         .test-section h3 { margin-top: 0; color: #1976d2; }
-        .loading { display: none; color: #007bff; font-weight: bold; }
+        .loading { font-style: italic; margin-top: 10px; display: none; color: #007bff; font-weight: bold; }
         .grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
     </style>
     <script>
         function showLoading() {
             document.querySelector('.loading').style.display = 'block';
             document.querySelector('.btn').disabled = true;
+            const result = document.querySelector('.result');
+            if (result) result.style.display = 'none';
         }
     </script>
 </head>
@@ -121,85 +123,89 @@ HTML_TEMPLATE = """
                 <div class="form-group">
                     <label for="localization_url">Enter Localization URL:</label>
                     <input type="text" id="localization_url" name="localization_url" 
-                           placeholder="https://example.com/de/ or https://example.com/fr/" required>
-                    <div class="example">Example: https://www.nakivo.com/de/ (German version)</div>
+                           placeholder="https://www.nakivo.com/de/ or https://www.nakivo.com/fr/" required>
+                    <div class="example">Example: Enter localized URLs</div>
                 </div>
                 
                 <button type="submit" class="btn">🔍 Check All Links</button>
-                
                 <div class="loading">⏳ Analyzing webpage and checking links... This may take a few moments.</div>
             </form>
         </div>
 
-        {% if stats and stats.get('error') %}
-        <div class="alert alert-warning">
-            <strong>❌ Error:</strong> {{ stats.error }}
-        </div>
-        {% endif %}
-
-        {% if stats and stats.get('warning') %}
-        <div class="alert alert-warning">
-            <strong>⚠️ Warning:</strong> {{ stats.warning }}
-        </div>
-        {% endif %}
-
-        {% if stats and not stats.get('error') and not stats.get('warning') %}
-        <div class="alert alert-success">
-            <strong>✅ Analysis Complete!</strong> Found {{ stats.total_links }} links 
-            with {{ stats.success_rate|round(1) }}% success rate.
-        </div>
-
-        <div class="localization-info">
-            <h3>🌍 Page Information</h3>
-            <p><strong>URL:</strong> {{ stats.base_url }}</p>
-            <p><strong>Detected Language:</strong> {{ stats.language_detected.upper() }}</p>
-            <p><strong>Page Title:</strong> {{ stats.page_title }}</p>
-            <p><strong>Processing Time:</strong> {{ "%.2f"|format(stats.processing_time) }}s</p>
-        </div>
-
-        <div class="stats">
-            <h3>📊 Link Analysis Results</h3>
-            <div class="grid-stats">
-                <div><strong>Total Links:</strong> {{ stats.total_links }}</div>
-                <div><strong>Working Links:</strong> <span class="success-status">{{ stats.working_links }}</span></div>
-                <div><strong>Broken Links:</strong> <span class="error-status">{{ stats.broken_links }}</span></div>
-                <div><strong>Localization Defects:</strong> <span class="defect-status">{{ stats.localization_defects }}
-                </span></div>
-                <div><strong>Warning Links:</strong> <span class="warning-status">{{ stats.warning_links }}</span></div>
+        <div class="result">
+            {% if stats and stats.get('error') %}
+            <div class="alert alert-warning">
+                <strong>❌ Error:</strong> {{ stats.error }}
             </div>
-        </div>
+            {% endif %}
+    
+            {% if stats and stats.get('warning') %}
+            <div class="alert alert-warning">
+                <strong>⚠️ Warning:</strong> {{ stats.warning }}
+            </div>
+            {% endif %}
+    
+            {% if stats and not stats.get('error') and not stats.get('warning') %}
+                <div class="alert alert-success">
+                    <strong>✅ Analysis Complete!</strong> Found {{ stats.total_links }} links
+                    {% if stats.localization_defects or stats.broken_links or stats.warning_links%}
+                    ({% if stats.localization_defects%}{{stats.localization_defects}} defect{% endif %}{% if stats.broken_links%},
+                    {{stats.broken_links}} broken{% endif %}{% if stats.warning_links %},
+                    {{stats.warning_links}} warning{% endif %}){% endif %}
+                    with {{(stats.success_rate or 0)|round(1)}}% success rate.
+                </div>
         
-        <h3>🔗 Detailed Results</h3>
-        <div>
-            {% for result in links %}
-            <div class="link-item">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <strong class="{{ 'success-status' if result.status == 'success' 
-                    else 'error-status' if result.status == 'error' 
-                    else 'defect-status' if result.status == 'localization_defect' 
-                    else 'warning-status' if result.status == 'warning'}}">
-                        {{ result.status_code or 'N/A' }} - {{ result.status.replace('_', ' ').title() }}
-                    </strong>
+                <div class="localization-info">
+                    <h3>🌍 Page Information</h3>
+                    <p><strong>URL:</strong> {{ stats.base_url }}</p>
+                    <p><strong>Detected Language:</strong> {{ stats.language_detected.upper() }}</p>
+                    <p><strong>Page Title:</strong> {{ stats.page_title }}</p>
+                    <p><strong>Processing Time:</strong> {{ "%.2f"|format(stats.processing_time) }}s</p>
                 </div>
-                <div style="margin-top: 5px;">
-                    <a href="{{ result.url }}" target="_blank" style="color: #007bff; text-decoration: none;">
-                    {{ result.url }}</a>
-                </div>
-                {% if result.link_text %}
-                <div style="margin-top: 5px; font-size: 12px">
-                    <strong>Link Text:</strong> "{{ result.link_text[:80] }}{% if result.link_text|length > 80 %}...{% endif %}"
-                </div>
-                {% endif %}
-                {% if result.localization_issue %}
-                    <div style="margin-top: 5px; font-size: 12px;">
-                    <strong>Issue:</strong> {{ result.localization_issue }}
+        
+                <div class="stats">
+                    <h3>📊 Link Analysis Results</h3>
+                    <div class="grid-stats">
+                        <div><strong>Total Links:</strong> {{ stats.total_links }}</div>
+                        <div><strong>Working Links:</strong> <span class="success-status">{{ stats.working_links }}</span></div>
+                        <div><strong>Broken Links:</strong> <span class="error-status">{{ stats.broken_links }}</span></div>
+                        <div><strong>Localization Defects:</strong> <span class="defect-status">{{ stats.localization_defects }}
+                        </span></div>
+                        <div><strong>Warning Links:</strong> <span class="warning-status">{{ stats.warning_links }}</span></div>
                     </div>
-                {% endif %}
-            </div>
-            {% endfor %}
+                </div>
+                
+                <h3>🔗 Detailed Results</h3>
+                <div>
+                    {% for result in links %}
+                    <div class="link-item">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <strong class="{{ 'success-status' if result.status == 'success' 
+                            else 'error-status' if result.status == 'error' 
+                            else 'defect-status' if result.status == 'localization_defect' 
+                            else 'warning-status' if result.status == 'warning'}}">
+                                {{ result.status_code or 'N/A' }} - {{ result.status.replace('_', ' ').title() }}
+                            </strong>
+                        </div>
+                        <div style="margin-top: 5px;">
+                            <a href="{{ result.url }}" target="_blank" style="color: #007bff; text-decoration: none;">
+                            {{ result.url }}</a>
+                        </div>
+                        {% if result.link_text %}
+                        <div style="margin-top: 5px; font-size: 12px">
+                            <strong>Link Text:</strong> "{{ result.link_text[:80] }}{% if result.link_text|length > 80 %}...{% endif %}"
+                        </div>
+                        {% endif %}
+                        {% if result.issue %}
+                            <div style="margin-top: 5px; font-size: 12px;">
+                            <strong>Issue:</strong> {{ result.issue }}
+                            </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
         </div>
-        {% endif %}
-    </div>
 </body>
 </html>
 """
@@ -274,7 +280,7 @@ class LinkChecker:
         return "en"
 
     def is_url_redirect(self, url: str) -> Dict:
-        """Simple function to check if URL redirects to another URL"""
+        """Check if URL redirects to another URL"""
         try:
             # Use GET to follow redirects and get the final URL
             headers = {'User-Agent': CONFIG['user_agent']}
@@ -282,9 +288,7 @@ class LinkChecker:
             response.raise_for_status()
 
             # Simple comparison - normalize URLs
-            original_url = url.rstrip('/')
-            final_url = response.url.rstrip('/')
-            is_redirect = final_url != original_url
+            is_redirect = response.url.rstrip('/') != url.rstrip('/')
 
             return {
                 'redirected': is_redirect,
@@ -386,7 +390,7 @@ class LinkChecker:
         """Get main or section or body tags."""
         main = soup.find('main')
         if not main:
-            main = soup.body.find('main')
+            main = soup.body.find('main') if soup.body else None
         if main and hasattr(main, 'find_all'):
             logger.info("Extracting links from <main> tag.")
             return [main]
@@ -411,7 +415,7 @@ class LinkChecker:
                 return {
                     'status': Status.ERROR,
                     'status_code': response.status_code,
-                    'localization_issue': f"Link is broken (HTTP {response.status_code})"
+                    'issue': f"Link is broken (HTTP {response.status_code})"
                 }
             parsed_link = urlparse(link_url)
             path = parsed_link.path.lower()
@@ -420,8 +424,8 @@ class LinkChecker:
             if "nakivo.com" not in parsed_link.netloc.lower():
                 return {
                     'status': Status.WARNING,
-                    'status_code': None,
-                    'localization_issue': f"Not match nakivo.com"
+                    'status_code': response.status_code,
+                    'issue': f"Not match nakivo.com"
                 }
 
             # --- Custom logic for localized file links ---
@@ -443,7 +447,7 @@ class LinkChecker:
             return {
                 'status': Status.ERROR,
                 'status_code': None,
-                'localization_issue': f"Error checking link: {str(e)}"
+                'issue': f"Error checking link: {str(e)}"
             }
 
     def _check_localized_link(self, link_url: str) -> Dict:
@@ -456,27 +460,27 @@ class LinkChecker:
                     return {
                         'status': Status.SUCCESS,
                         'status_code': 200,
-                        'localization_issue': None
+                        'issue': None
                     }
                 # If the final URL is different with the verify link -> success, but warning redirect issue
                 else:
                     return {
                         'status': Status.SUCCESS,
                         'status_code': 200,
-                        'localization_issue': f"Redirected to: {response.url}"
+                        'issue': f"Redirected to: {response.url}"
                     }
             # If the final link responds non-200 -> localization defect
             else:
                 return {
                     'status': Status.LOCALIZATION_DEFECT,
                     'status_code': response.status_code,
-                    'localization_issue': f"Localized link returns {response.status_code}, {response.url}"
+                    'issue': f"Localized link returns {response.status_code}, {response.url}"
                 }
         except Exception as e:
             return {
                 'status': Status.ERROR,
                 'status_code': None,
-                'localization_issue': f"Error check localized link: {str(e)}"
+                'issue': f"Error check localized link: {str(e)}"
             }
 
     def _check_non_localized_link(self, link_url: str, base_url: str, locale: str) -> Dict:
@@ -487,63 +491,70 @@ class LinkChecker:
             return {
                 'status': Status.ERROR,
                 'status_code': response.status_code,
-                'localization_issue': f"Link is broken (HTTP {response.status_code})"
+                'issue': f"Link is broken (HTTP {response.status_code})"
             }
 
-        # Check if a localized version should exist
-        expected_localized = self._get_expected_localized_url(link_url, locale)
-        if expected_localized and expected_localized != link_url:
-            # Check if localized version exists
-            try:
-                resp = self.session.get(expected_localized, timeout=CONFIG['timeout'], allow_redirects=True)
-                final_url = resp.url
+        try:
+            # Check if a localized version should exist
+            expected_localized = self._get_expected_localized_url(link_url, locale)
+            if expected_localized and expected_localized != link_url:
+                # Check if localized version exists
+                try:
+                    resp = self.session.get(expected_localized, timeout=CONFIG['timeout'], allow_redirects=True)
+                    final_url = resp.url
 
-                if resp.status_code == 200:
-                    # Normalize URLs by removing fragments for comparison
-                    original_link_clean = self._remove_fragments(link_url)
-                    expected_localized_clean = self._remove_fragments(expected_localized)
-                    final_url_clean = self._remove_fragments(final_url)
+                    if resp.status_code == 200:
+                        # Normalize URLs by removing fragments for comparison
+                        original_link_clean = self._remove_fragments(link_url)
+                        expected_localized_clean = self._remove_fragments(expected_localized)
+                        final_url_clean = self._remove_fragments(final_url)
 
-                    # If the final link is different with non-localized link and expected localized link -> localization defect
-                    if final_url_clean != original_link_clean and final_url_clean != expected_localized_clean:
-                        return {
-                            'status': Status.LOCALIZATION_DEFECT,
-                            'status_code': 200,
-                            'localization_issue': f"Final link - {final_url} is different with non-localized link and expected localized link {expected_localized}"
-                        }
-                    # If the final link and the expected localized URL exists as a real page, but the link does not point to it -> localization defect
-                    elif final_url_clean != original_link_clean and final_url_clean == expected_localized_clean:
-                        return {
-                            'status': Status.LOCALIZATION_DEFECT,
-                            'status_code': 200,
-                            'localization_issue': f"Should link to localized version: {expected_localized}"
-                        }
-                    # If the final link is different with expected localized link, the same with non-localized link -> no localized version exists, redirect to default version
-                    # final_url_clean == original_link_clean and final_url_clean == expected_localized_clean:
+                        # If the final link is different with non-localized link and expected localized link -> warning message
+                        if final_url_clean != original_link_clean and final_url_clean != expected_localized_clean:
+                            return {
+                                'status': Status.SUCCESS,
+                                'status_code': 200,
+                                'issue': f"Final link - {final_url} is different with non-localized link and expected localized link {expected_localized}"
+                            }
+                        # If the final link and the expected localized URL exists as a real page, but the link does not point to it -> localization defect
+                        elif final_url_clean != original_link_clean and final_url_clean == expected_localized_clean:
+                            return {
+                                'status': Status.LOCALIZATION_DEFECT,
+                                'status_code': 200,
+                                'issue': f"Should link to localized version: {expected_localized}"
+                            }
+                        # If the final link is different with expected localized link, the same with non-localized link -> no localized version exists, redirect to default version
+                        # final_url_clean == original_link_clean and final_url_clean == expected_localized_clean:
+                        else:
+                            return {
+                                'status': Status.SUCCESS,
+                                'status_code': 200,
+                                'issue': f"No localized version exists - {expected_localized}; so redirects to default version: {final_url}"
+                            }
                     else:
+                        # Localization expected link: redirect return 404 or other error: not exist -> no defect
                         return {
                             'status': Status.SUCCESS,
-                            'status_code': 200,
-                            'localization_issue': f"No localized version exists - {expected_localized}; so redirects to default version: {final_url}"
+                            'status_code': None,
+                            'issue': f"No localized version exists - {expected_localized}, returns status code: {resp.status_code}"
                         }
-                else:
-                    # Localization expected link: redirect return 404 or other error: not exist -> no defect
+                except Exception as e:
                     return {
-                        'status': Status.SUCCESS,
+                        'status': Status.ERROR,
                         'status_code': None,
-                        'localization_issue': f"No localized version exists - {expected_localized}, returns status code: {resp.status_code}"
+                        'issue': f"Error check non-localized link: {str(e)}"
                     }
-            except Exception as e:
+            else:
                 return {
-                    'status': Status.ERROR,
-                    'status_code': None,
-                    'localization_issue': f"Error check non-localized link: {str(e)}"
+                    'status': Status.SUCCESS,
+                    'status_code': 200,
+                    'issue': f"No localized version exists - {expected_localized}"
                 }
-        else:
+        except Exception as e:
             return {
-                'status': Status.SUCCESS,
-                'status_code': 200,
-                'localization_issue': f"No localized version exists - {expected_localized}"
+                'status': Status.ERROR,
+                'status_code': None,
+                'issue': f"Error: {str(e)}"
             }
 
     def _remove_fragments(self, url: str) -> str:
@@ -595,7 +606,7 @@ def generate_csv_report(results: List[Dict], base_url: str) -> str:
                 'link_text': result.get('link_text', ''),
                 'status_code': result.get('status_code', ''),
                 'status': result.get('status', ''),
-                'issue': result.get('localization_issue', ''),
+                'issue': result.get('issue', ''),
                 'base_url': base_url
             })
 
@@ -615,7 +626,7 @@ def index():
         try:
             start_time = time.time()
 
-            # Validation
+            # Validate URL
             if not checker.is_valid_url(localization_url):
                 return render_template_string(HTML_TEMPLATE, stats={'error': f'Invalid URL format: {localization_url}'},
                                               links=[])
@@ -652,14 +663,15 @@ def index():
 
             # Check each link
             results = []
-            for link_data in links_data:
+            for j, link_data in enumerate(links_data, 1):
+                logger.info(f"🔍 Checking link {j}/{len(links_data)}: {link_data['url']}")
                 result = checker.check_link_localization(link_data['url'], localization_url, locale)
                 results.append({
                     'url': link_data['url'],
                     'link_text': link_data['link_text'],
                     'status': result['status'],
                     'status_code': result['status_code'],
-                    'localization_issue': result['localization_issue']
+                    'issue': result['issue']
                 })
 
             # Calculate statistics
@@ -682,6 +694,9 @@ def index():
                 'success_rate': (working_links / total_links * 100) if total_links else 0,
                 'processing_time': processing_time
             }
+
+            logger.info(f"✅ Successfully processed: {localization_url} - {total_links} links,"
+                        f" {working_links} working, {localization_defects} localization defect, {broken_links} broken")
 
             # Generate CSV report
             report_filename = generate_csv_report(results, localization_url)
