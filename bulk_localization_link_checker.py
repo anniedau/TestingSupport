@@ -567,7 +567,7 @@ class LinkChecker:
                     return {
                         'status': Status.SUCCESS,
                         'status_code': None,
-                        'issue': f"No localized version exists - {expected_localized}, returns status code: {resp.status_code}"
+                        'issue': f"{resp.status_code} - No localized version exists - {expected_localized}"
                     }
             except Exception as e:
                 return {

@@ -157,7 +157,8 @@ HTML_TEMPLATE = """
         
                 <div class="localization-info">
                     <h3>🌍 Page Information</h3>
-                    <p><strong>URL:</strong> {{ stats.base_url }}</p>
+                    <p><strong>URL:</strong> 
+                    <a href="{{ stats.base_url  }}" target="_blank">{{ stats.base_url  }}</a> </p>
                     <p><strong>Detected Language:</strong> {{ stats.language_detected.upper() }}</p>
                     <p><strong>Page Title:</strong> {{ stats.page_title }}</p>
                     <p><strong>Processing Time:</strong> {{ "%.2f"|format(stats.processing_time) }}s</p>
@@ -536,7 +537,7 @@ class LinkChecker:
                         return {
                             'status': Status.SUCCESS,
                             'status_code': None,
-                            'issue': f"No localized version exists - {expected_localized}, returns status code: {resp.status_code}"
+                            'issue': f"{resp.status_code} - No localized version exists - {expected_localized}"
                         }
                 except Exception as e:
                     return {
