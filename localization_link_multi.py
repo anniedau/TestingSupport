@@ -213,12 +213,33 @@ HTML_TEMPLATE = """
             {% if stats and not stats.get('error') and not stats.get('warning') %}
                 <div class="alert alert-success">
                     <strong>✅ Analysis Complete!</strong> 
-                    Processed {{ stats.total_localizations }} localization  
-                    {% if stats.total_localization_defects or stats.total_broken_links or stats.total_warning_links%}
-                    ({% if stats.total_localization_defects%}{{stats.total_localization_defects}} defect{% endif %}{% if stats.total_broken_links%},
-                    {{stats.total_broken_links}} broken{% endif %}{% if stats.total_warning_links%},
-                    {{stats.total_warning_links}} warning{% endif %}){% endif %}
-                    with {{ stats.overall_success_rate|round(1) }}% overall success rate.
+                    {% if stats.total_localizations > 0 %}
+                    
+                        Processed {{ stats.total_localizations }} localization, tool found {{stats.total_links}} links
+                        {% set results = [] %}
+                        
+                        {% if stats.total_working_links > 0 %}
+                            {% set results = results + [stats.total_working_links|string + ' success'] %}
+                        {% endif %}
+                        
+                        {% if stats.total_broken_links > 0 %}
+                            {% set results = results + [stats.total_broken_links|string + ' broken'] %}
+                        {% endif %}
+                        
+                        {% if stats.total_localization_defects > 0 %}
+                            {% set results = results + [stats.total_localization_defects|string + ' defect'] %}
+                        {% endif %}
+                        
+                        {% if stats.total_warning_links > 0 %}
+                            {% set results = results + [stats.total_warning_links|string + ' warning'] %}
+                        {% endif %}
+                        
+                        {% if results %}
+                            ({{ results|join(', ') }})
+                        {% endif %}
+                        
+                        with {{ stats.overall_success_rate|round(1) }}% overall success rate.
+                    {% endif %}
                 </div>
     
                 <div class="localization-info">

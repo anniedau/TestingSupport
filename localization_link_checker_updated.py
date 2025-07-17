@@ -147,12 +147,31 @@ HTML_TEMPLATE = """
     
             {% if stats and not stats.get('error') and not stats.get('warning') %}
                 <div class="alert alert-success">
-                    <strong>✅ Analysis Complete!</strong> Found {{ stats.total_links }} links
-                    {% if stats.localization_defects or stats.broken_links or stats.warning_links%}
-                    ({% if stats.localization_defects%}{{stats.localization_defects}} defect{% endif %}{% if stats.broken_links%},
-                    {{stats.broken_links}} broken{% endif %}{% if stats.warning_links %},
-                    {{stats.warning_links}} warning{% endif %}){% endif %}
-                    with {{(stats.success_rate or 0)|round(1)}}% success rate.
+                    <strong>✅ Analysis Complete!</strong>
+                    Found {{ stats.total_links }} links
+                    {% set results = [] %}
+                    
+                    {% if stats.working_links > 0 %}
+                        {% set results = results + [stats.working_links|string + ' success'] %}
+                    {% endif %}
+                    
+                    {% if stats.broken_links > 0 %}
+                        {% set results = results + [stats.broken_links|string + ' broken'] %}
+                    {% endif %}
+                    
+                    {% if stats.localization_defects > 0 %}
+                        {% set results = results + [stats.localization_defects|string + ' defect'] %}
+                    {% endif %}
+                    
+                    {% if stats.warning_links > 0 %}
+                        {% set results = results + [stats.warning_links|string + ' warning'] %}
+                    {% endif %}
+                    
+                    {% if results %}
+                        ({{ results|join(', ') }})
+                    {% endif %}
+                    
+                    with {{ stats.success_rate|round(1) }}% overall success rate.
                 </div>
         
                 <div class="localization-info">
