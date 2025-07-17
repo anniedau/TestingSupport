@@ -407,7 +407,7 @@ class LinkChecker:
             logger.warning("No <main>, <section>, or <body> tag found. Extracting links from full page.")
             return [soup]
 
-    def check_link_localization(self, link_url: str, base_url: str, locale: str) -> Dict:
+    def check_link_localization(self, link_url: str, locale: str) -> Dict:
         """Check if link is properly localized"""
         try:
             # First check if original link works
@@ -441,7 +441,7 @@ class LinkChecker:
                 return self._check_localized_link(link_url)
             else:
                 # Check if link is not localized
-                return self._check_non_localized_link(link_url, base_url, locale)
+                return self._check_non_localized_link(link_url, locale)
 
         except Exception as e:
             logger.exception(f"❌ Error checking link {link_url}: {e}")
@@ -484,7 +484,7 @@ class LinkChecker:
                 'issue': f"Error check localized link: {str(e)}"
             }
 
-    def _check_non_localized_link(self, link_url: str, base_url: str, locale: str) -> Dict:
+    def _check_non_localized_link(self, link_url: str, locale: str) -> Dict:
         """Check non-localized link for potential localization issues"""
         # First check if original link works
         response = self.session.get(link_url, timeout=CONFIG['timeout'], allow_redirects=True)
@@ -666,7 +666,7 @@ def index():
             results = []
             for j, link_data in enumerate(links_data, 1):
                 logger.info(f"🔍 Checking link {j}/{len(links_data)}: {link_data['url']}")
-                result = checker.check_link_localization(link_data['url'], localization_url, locale)
+                result = checker.check_link_localization(link_data['url'], locale)
                 results.append({
                     'url': link_data['url'],
                     'link_text': link_data['link_text'],
@@ -705,8 +705,8 @@ def index():
             return render_template_string(HTML_TEMPLATE, stats=stats, links=results, report_filename=report_filename)
 
         except Exception as e:
-            logger.exception(f"❌ Unexpected error: {e}")
-            return render_template_string(HTML_TEMPLATE, stats={'error': f'Unexpected error: {str(e)}'}, links=[])
+            logger.exception(f"❌ Unexpected error in tool: {e}")
+            return render_template_string(HTML_TEMPLATE, stats={'error': f'Unexpected error in tool: {str(e)}'}, links=[])
 
         finally:
             # Clean up resources

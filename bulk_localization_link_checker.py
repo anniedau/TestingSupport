@@ -438,7 +438,7 @@ class LinkChecker:
             logger.warning("No <main>, <section>, or <body> tag found. Extracting links from full page.")
             return [soup]
 
-    def check_link_localization(self, link_url: str, base_url: str, locale: str) -> Dict:
+    def check_link_localization(self, link_url: str, locale: str) -> Dict:
         """Check if link is properly localized"""
         try:
             # First check if original link works
@@ -472,7 +472,7 @@ class LinkChecker:
                 return self._check_localized_link(link_url)
             else:
                 # Check if link is not localized
-                return self._check_non_localized_link(link_url, base_url, locale)
+                return self._check_non_localized_link(link_url, locale)
 
         except Exception as e:
             logger.exception(f"❌ Error checking link {link_url}: {e}")
@@ -515,7 +515,7 @@ class LinkChecker:
                 'issue': f"Error check localized link: {str(e)}"
             }
 
-    def _check_non_localized_link(self, link_url: str, base_url: str, locale: str) -> Dict:
+    def _check_non_localized_link(self, link_url: str, locale: str) -> Dict:
         """Check non-localized link for potential localization issues"""
         # First check if original link works
         response = self.session.get(link_url, timeout=CONFIG['timeout'], allow_redirects=True)
@@ -707,7 +707,7 @@ class LinkChecker:
                     logger.info(f"🔍 Checking link {j}/{len(links_data)}: {link_data['url']}")
 
                     try:
-                        result = self.check_link_localization(link_data['url'], url, locale)
+                        result = self.check_link_localization(link_data['url'], locale)
 
                         link_results.append({
                             'url': link_data['url'],
@@ -761,7 +761,7 @@ class LinkChecker:
                 results.append({
                     'url': url,
                     'status': 'error',
-                    'message': f'Unexpected error: {str(e)}',
+                    'message': f'Unexpected error processing: {str(e)}',
                     'links': [],
                     'stats': None
                 })
@@ -869,7 +869,7 @@ def index():
         except Exception as e:
             logger.exception(f"❌ Unexpected error in bulk processing: {e}")
             return render_template_string(HTML_TEMPLATE,
-                                          stats={'error': f'Unexpected error: {str(e)}'},
+                                          stats={'error': f'Unexpected error in bulk processing: {str(e)}'},
                                           links=[])
         finally:
             # Clean up resources

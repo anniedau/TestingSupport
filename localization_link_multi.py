@@ -228,7 +228,9 @@ HTML_TEMPLATE = """
                         {{  stats.base_url }}</a> </div>
                         <div><strong>Localization Checked:</strong> {{ stats.total_localizations }}</div>
                         <div><strong>Total Links:</strong> {{ stats.total_links }}</div>
-                        <div><strong>Success Rate:</strong> {{ stats.overall_success_rate|round(1) }}%</div>
+                        <div><strong>Success Rate:</strong> 
+                        {% if stats and stats.get('overall_success_rate') is not none %}{{ stats.overall_success_rate|round(1) }}%
+                                    {% else %}0.0%{% endif %}</div>
                         <div><strong>Working Links:</strong> {{ stats.total_working_links }}</div>
                         <div><strong>Broken Links:</strong> {{ stats.total_broken_links }}</div>
                         <div><strong>Localization Defects:</strong> {{ stats.total_localization_defects }}</div>
@@ -249,7 +251,9 @@ HTML_TEMPLATE = """
                                     <div><strong>Broken:</strong> <span class="error-status">{{ locale_result.stats.broken_links }}</span></div>
                                     <div><strong>Defect:</strong> <span class="defect-status">{{ locale_result.stats.localization_defects }}</span></div>
                                     <div><strong>Warning:</strong> <span class="warning-status">{{ locale_result.stats.warning_links }}</span></div>
-                                    <div><strong>Success Rate:</strong> {{ locale_result.stats.success_rate|round(1) }}%</div>
+                                    <div><strong>Success Rate:</strong> 
+                                    {% if stats and stats.get('overall_success_rate') is not none %}{{ stats.overall_success_rate|round(1) }}%
+                                    {% else %}0.0%{% endif %}</div>
                                 </div>
                             </div>
                             
@@ -529,7 +533,7 @@ class LinkChecker:
             logger.warning("No <main>, <section>, or <body> tag found. Extracting links from full page.")
             return [soup]
 
-    def check_link_localization(self, link_url: str, base_url: str, locale: str) -> Dict:
+    def check_link_localization(self, link_url: str, locale: str) -> Dict:
         """Check if link is properly localized"""
         try:
             # First check if original link works
@@ -563,7 +567,7 @@ class LinkChecker:
                 return self._check_localized_link(link_url)
             else:
                 # Check if link is not localized
-                return self._check_non_localized_link(link_url, base_url, locale)
+                return self._check_non_localized_link(link_url, locale)
 
         except Exception as e:
             logger.exception(f"❌ Error checking link {link_url}: {e}")
@@ -606,7 +610,7 @@ class LinkChecker:
                 'issue': f"Error check localized link: {str(e)}"
             }
 
-    def _check_non_localized_link(self, link_url: str, base_url: str, locale: str) -> Dict:
+    def _check_non_localized_link(self, link_url: str, locale: str) -> Dict:
         """Check non-localized link for potential localization issues"""
         # First check if original link works
         response = self.session.get(link_url, timeout=CONFIG['timeout'], allow_redirects=True)
@@ -730,12 +734,12 @@ class LinkChecker:
                 }
 
             # Check for redirects
-            redirect_info = self.is_url_redirect(localized_url)
-            if redirect_info['error']:
+            redirect_check = self.check_url_redirect(localized_url)
+            if 'error' in redirect_check:
                 return {
                     'locale': locale,
                     'localized_url': localized_url,
-                    'error': f'Cannot access URL: {redirect_info["error"]}',
+                    'error': redirect_check['error'],
                     'links': [],
                     'stats': {}
                 }
@@ -754,7 +758,7 @@ class LinkChecker:
             # Check each link
             results = []
             for link_data in links_data:
-                result = self.check_link_localization(link_data['url'], localized_url, locale)
+                result = self.check_link_localization(link_data['url'], locale)
                 results.append({
                     'url': link_data['url'],
                     'link_text': link_data['link_text'],
@@ -796,7 +800,7 @@ class LinkChecker:
             return {
                 'locale': locale,
                 'localized_url': localized_url,
-                'error': f'Unexpected error: {str(e)}',
+                'error': f'Unexpected error in process single localization: {str(e)}',
                 'links': [],
                 'stats': {}
             }
@@ -903,17 +907,28 @@ def index():
             # Calculate overall statistics
             total_localizations = len(localization_results)
             successful_localizations = len([r for r in localization_results if not r['error']])
-            total_links = sum(len(r['links']) for r in localization_results if not r['error'])
-            total_working_links = sum(
-                r['stats'].get('working_links', 0) for r in localization_results if not r['error'])
-            total_broken_links = sum(
-                r['stats'].get('broken_links', 0) for r in localization_results if not r['error'])
-            total_localization_defects = sum(
-                r['stats'].get('localization_defects', 0) for r in localization_results if not r['error'])
-            total_warning_links = sum(
-                r['stats'].get('warning_links', 0) for r in localization_results if not r['error'])
 
-            overall_success_rate = (total_working_links / total_links * 100) if total_links > 0 else 0
+            if successful_localizations > 0:
+                total_links = sum(len(r['links']) for r in localization_results if not r['error'])
+                total_working_links = sum(
+                    r['stats'].get('working_links', 0) for r in localization_results if not r['error'])
+                total_broken_links = sum(
+                    r['stats'].get('broken_links', 0) for r in localization_results if not r['error'])
+                total_localization_defects = sum(
+                    r['stats'].get('localization_defects', 0) for r in localization_results if not r['error'])
+                total_warning_links = sum(
+                    r['stats'].get('warning_links', 0) for r in localization_results if not r['error'])
+
+                overall_success_rate = (total_working_links / total_links * 100) if total_links > 0 else 0
+            else:
+                # If all localizations failed, set defaults
+                total_links = 0
+                total_working_links = 0
+                total_broken_links = 0
+                total_localization_defects = 0
+                total_warning_links = 0
+                overall_success_rate = 0
+
             processing_time = time.time() - start_time
 
             overall_stats = {
@@ -941,9 +956,9 @@ def index():
                                           report_filename=report_filename)
 
         except Exception as e:
-            logger.exception(f"❌ Unexpected error: {e}")
+            logger.exception(f"❌ Unexpected error in tool: {e}")
             return render_template_string(HTML_TEMPLATE,
-                                          stats={'error': f'Unexpected error: {str(e)}'},
+                                          stats={'error': f'Unexpected error in tool: {str(e)}'},
                                           localization_results=[])
 
         finally:
